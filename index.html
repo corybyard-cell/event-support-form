@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Event Support Form</title>
+  <style>
+    body{ font-family: Arial, sans-serif; margin:20px; }
+    .question{ font-weight:bold; margin-top:16px; }
+    .response{ margin-left:20px; margin-top:4px; }
+    .textInput{ width:50%; padding:4px; }
+    .numberInput{ width:60px; padding:4px; }
+    .optionLine{ display:block; margin-left:20px; margin-top:2px; }
+    button{ margin-top:20px; margin-right:10px; padding:6px 14px; }
+    #status{ margin-top:16px; font-weight:bold; }
+    .ok{ color:#1a7f37; } .err{ color:#b42318; }
+  </style>
+</head>
+<body>
+
+<h2 id="title">Loading…</h2>
+
+<form id="dynamicForm" style="display:none">
+  <div id="formContainer"></div>
+  <div class="form-buttons">
+    <button type="button" id="saveBtn">Save</button>
+    <button type="button" id="submitBtn">Submit</button>
+  </div>
+</form>
+<div id="status"></div>
+
+<script>
+// Your Apps Script web app URL (the plain /exec URL)
+const EXEC = "https://script.google.com/macros/s/AKfycbzN5cE8bblNQ1yurSThecWRpDoVqT1r98pt4BzMjZ2Aw9hZ8LScOE55VOGOpIAoI9jrIA/exec";
+
+const params   = new URLSearchParams(location.search);
+const sourceKey = params.get("sourceKey");
+const eventId   = params.get("eventId");
+
+let formConfig = null;
+let rowData = {};
+
+const statusEl = document.getElementById("status");
+function setStatus(msg, ok) {
+  statusEl.textContent = msg;
+  statusEl.className = ok ? "ok" : "err";
+}
+
+async function load() {
+  if (!sourceKey || !eventId) {
+    document.getElementById("title").textContent = "Event Support Form";
+    setStatus("Missing sourceKey or eventId. Please use the link in your notification email.", false);
+    return;
+  }
+  try {
+    const url = EXEC + "?action=getForm&sourceKey=" + encodeURIComponent(sourceKey) +
+                "&eventId=" + encodeURIComponent(eventId);
+    const res = await fetch(url);
+    const data = JSON.parse(await res.text());
+    formConfig = typeof data.formJson === "string" ? JSON.parse(data.formJson) : data.formJson;
+    rowData = data.rowData || {};
+    document.getElementById("title").textContent = formConfig.title;
+    document.title = formConfig.title;
+    renderForm();
+    document.getElementById("dynamicForm").style.display = "";
+  } catch (err) {
+    document.getElementById("title").textContent = "Event Support Form";
+    setStatus("Could not load the form. Please check the link or try again later.", false);
+    console.error(err);
+  }
+}
+
+function renderForm() {
+  const container = document.getElementById("formContainer");
+  container.innerHTML = "";
+
+  formConfig.items.forEach(item => {
+    const fieldName = item.column || item.title;
+    if (!fieldName) return;
+
+    const q = document.createElement("div");
+    q.className = "question";
+    q.textContent = item.title;
+    container.appendChild(q);
+
+    const current = rowData[item.column];
+
+    if (item.type === "TEXT" || item.type === "PARAGRAPH_TEXT") {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "response textInput";
+      input.name = fieldName;
+      input.value = current || "";
+      if (item.width) input.style.width = item.width;
+      container.appendChild(input);
+    }
+    else if (item.type === "NUMBER") {
+      const input = document.createElement("input");
+      input.type = "number";
+      input.className = "response numberInput";
+      input.name = fieldName;
+      input.value = current || "";
+      if (item.width) input.style.width = item.width;
+      container.appendChild(input);
+    }
+    else if (item.type === "MULTIPLE_CHOICE") {
+      item.choices.forEach(choice => {
+        const label = document.createElement("label");
+        label.className = "optionLine";
+        const radio = document.createElement("input");
+        radio.type = "radio";
+        radio.name = fieldName;
+        radio.value = choice;
+        if (current === choice) radio.checked = true;
+        label.appendChild(radio);
+        label.appendChild(document.createTextNode(" " + choice));
+        container.appendChild(label);
+      });
+    }
+    else if (item.type === "CHECKBOX") {
+      let selected = current || [];
+      if (!Array.isArray(selected)) selected = String(selected).split(",").map(s => s.trim());
+      item.choices.forEach(choice => {
+        const label = document.createElement("label");
+        label.className = "optionLine";
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.name = fieldName;
+        box.value = choice;
+        if (selected.includes(choice)) box.checked = true;
+        label.appendChild(box);
+        label.appendChild(document.createTextNode(" " + choice));
+        container.appendChild(label);
+      });
+    }
+  });
+}
+
+async function send(action) {
+  const saveBtn = document.getElementById("saveBtn");
+  const submitBtn = document.getElementById("submitBtn");
+  saveBtn.disabled = submitBtn.disabled = true;
+  setStatus("Sending…", true);
+
+  // URL-encoded body = same shape as a native form post, and a "simple"
+  // request, so no CORS preflight. Repeated keys (checkboxes) are preserved.
+  const body = new URLSearchParams(new FormData(document.getElementById("dynamicForm")));
+  body.set("title", formConfig.title);
+  body.set("action", action);
+  if (!body.has("Event ID")) body.set("Event ID", eventId);
+
+  try {
+    const res = await fetch(EXEC, { method: "POST", body });
+    const result = JSON.parse(await res.text());
+    if (result.ok) {
+      setStatus(action === "save"
+        ? "Saved. You can return to this same link later to continue."
+        : "Submitted. Thank you!", true);
+    } else {
+      setStatus("The form could not be processed. Please try again.", false);
+    }
+  } catch (err) {
+    console.error(err);
+    setStatus("Something went wrong sending the form. Please try again.", false);
+  } finally {
+    saveBtn.disabled = submitBtn.disabled = false;
+  }
+}
+
+document.getElementById("saveBtn").addEventListener("click", () => send("save"));
+document.getElementById("submitBtn").addEventListener("click", () => send("submit"));
+load();
+</script>
+</body>
+</html>
