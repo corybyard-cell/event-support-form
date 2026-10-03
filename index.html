@@ -30,9 +30,14 @@
 <div id="status"></div>
 
 <script>
-// Your Apps Script web app URL (the plain /exec URL)
-const EXEC = "https://script.google.com/macros/s/AKfycbzN5cE8bblNQ1yurSThecWRpDoVqT1r98pt4BzMjZ2Aw9hZ8LScOE55VOGOpIAoI9jrIA/exec";
-
+// Your Apps Script web app URL (the plain /exec URL) change to support Test and Production web app URLs
+const EXEC = {
+  prod: "https://script.google.com/macros/s/AKfycbzN5cE8bblNQ1yurSThecWRpDoVqT1r98pt4BzMjZ2Aw9hZ8LScOE55VOGOpIAoI9jrIA/exec",
+  test: "https://script.google.com/macros/s/AKfycbzXzV1QFi7xPtBXeZAK8fZvjAZGo1n3fCVEQekxwowbBXNkZObDW1_RHRqj16WTvIM/exec"
+};
+const params = new URLSearchParams(window.location.search);
+const API_URL = BACKENDS[params.get("env")] || BACKENDS.prod;
+  
 const params   = new URLSearchParams(location.search);
 const sourceKey = params.get("sourceKey");
 const eventId   = params.get("eventId");
