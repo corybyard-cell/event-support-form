@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Event Support Form</title>
+  <style>
+    body{ font-family: Arial, sans-serif; margin:20px; }
+    .question{ font-weight:bold; margin-top:16px; }
+    .response{ margin-left:20px; margin-top:4px; }
+    .textInput{ width:50%; padding:4px; }
+    .numberInput{ width:60px; padding:4px; }
+    .optionLine{ display:block; margin-left:20px; margin-top:2px; }
+    button{ margin-top:20px; margin-right:10px; padding:6px 14px; }
+    #status{ margin-top:16px; font-weight:bold; }
+    .ok{ color:#1a7f37; } .err{ color:#b42318; }
+    /* NEW */
+    .intro{ white-space:pre-wrap; margin-bottom:12px; }
+    #status.msg{ white-space:pre-wrap; font-weight:normal; color:inherit; }
+  </style>
+</head>
+<body>
+
+<h2 id="title">Loading…</h2>
+
+<!-- NEW: optional header text (formJson.intro) -->
+<div id="intro" class="intro" style="display:none"></div>
+
+<form id="dynamicForm" style="display:none">
+  <div id="formContainer"></div>
+  <!-- NEW: buttons are rendered from formJson.buttons (default Save / Submit) -->
+  <div class="form-buttons" id="formButtons"></div>
+</form>
+<div id="status"></div>
+
+<script>
+// Your Apps Script web app URL (the plain /exec URL) change to support Test and Production web app URLs
+const BACKENDS = {
+  prod: "https://script.google.com/macros/s/AKfycbzN5cE8bblNQ1yurSThecWRpDoVqT1r98pt4BzMjZ2Aw9hZ8LScOE55VOGOpIAoI9jrIA/exec",
+  test: "https://script.google.com/macros/s/AKfycbzXzV1QFi7xPtBXeZAK8fZvjAZGo1n3fCVEQekxwowbBXNkZObDW1_RHRqj16WTvIM/exec"
+};
+
+const params     = new URLSearchParams(location.search);
+const ENV        = params.get("env");
+const EXEC       = BACKENDS[ENV] || BACKENDS.prod;
+const sourceKey  = params.get("sourceKey");
+const eventId    = params.get("eventId");
+const pageAction = params.get("action");      // NEW: one-click links such as &action=no
+let formConfig = null;
+let rowData = {};
+
+const statusEl = document.getElementById("status");
+function setStatus(msg, ok) {
+  statusEl.textContent = msg;
+  statusEl.className = ok ? "ok" : "err";
+}
+
+/* NEW: show a server-supplied result as PLAIN TEXT (never as HTML, because the
+   wording can contain event titles that originate in outside email) */
+function showMessage(text) {
+  document.getElementById("dynamicForm").style.display = "none";
+  document.getElementById("intro").style.display = "none";
+  statusEl.textContent = text;
+  statusEl.className = "msg";
+}
+
+/* NEW: open another form for the same event (keeps the env marker) */
+function goToForm(nextKey, id) {
+  const next = new URLSearchParams();
+  if (ENV) next.set("env", ENV);
+  next.set("sourceKey", nextKey);
+  next.set("eventId", id || eventId);
+  location.href = location.pathname + "?" + next.toString();
+}
+
+async function load() {
+  if (!sourceKey || !eventId) {
+    document.getElementById("title").textContent = "Event Support Form";
+    setStatus("Missing sourceKey or eventId. Please use the link in your notification email.", false);
+    return;
+  }
+
+  // NEW: one-click action link (e.g. the NO link in the booking email)
+  if (pageAction) {
+    await runAction();
+    return;
+  }
+
+  try {
+    const url = EXEC + "?action=getForm&sourceKey=" + encodeURIComponent(sourceKey) +
+                "&eventId=" + encodeURIComponent(eventId);
+    const res = await fetch(url);
+    const data = JSON.parse(await res.text());
+    formConfig = typeof data.formJson === "string" ? JSON.parse(data.formJson) : data.formJson;
+    rowData = data.rowData || {};
+    document.getElementById("title").textContent = formConfig.title;
+    document.title = formConfig.title;
+    renderIntro();
+    renderForm();
+    renderButtons();
+    document.getElementById("dynamicForm").style.display = "";
+  } catch (err) {
+    document.getElementById("title").textContent = "Event Support Form";
+    setStatus("Could not load the form. Please check the link or try again later.", false);
+    console.error(err);
+  }
+}
+
+/* NEW */
+async function runAction() {
+  document.getElementById("title").textContent = "Event Support";
+  setStatus("Working…", true);
+  try {
+    const url = EXEC + "?sourceKey=" + encodeURIComponent(sourceKey) +
+                "&eventId=" + encodeURIComponent(eventId) +
+                "&action=" + encodeURIComponent(pageAction) + "&format=json";
+    const res = await fetch(url);
+    const data = JSON.parse(await res.text());
+    if (data.ok) {
+      showMessage(data.message || "Thank you. Your response has been recorded.");
+    } else {
+      setStatus("We could not process this link. Please contact the Event Coordinator.", false);
+    }
+  } catch (err) {
+    console.error(err);
+    setStatus("Something went wrong. Please try the link again.", false);
+  }
+}
+
+/* NEW */
+function renderIntro() {
+  const el = document.getElementById("intro");
+  if (formConfig.intro) {
+    el.textContent = formConfig.intro;
+    el.style.display = "";
+  }
+}
+
+function renderForm() {
+  const container = document.getElementById("formContainer");
+  container.innerHTML = "";
+
+  formConfig.items.forEach(item => {
+    const fieldName = item.column || item.title;
+    if (!fieldName) return;
+
+    const q = document.createElement("div");
+    q.className = "question";
+    q.textContent = item.title;
+    container.appendChild(q);
+
+    const current = rowData[item.column];
+
+    if (item.type === "TEXT" || item.type === "PARAGRAPH_TEXT") {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "response textInput";
+      input.name = fieldName;
+      input.value = current || "";
+      if (item.width) input.style.width = item.width;
+      if (item.required) input.required = true;     // NEW
+      if (item.readonly) input.readOnly = true;     // NEW
+      container.appendChild(input);
+    }
+    else if (item.type === "NUMBER") {
+      const input = document.createElement("input");
+      input.type = "number";
+      input.className = "response numberInput";
+      input.name = fieldName;
+      input.value = current || "";
+      if (item.width) input.style.width = item.width;
+      if (item.required) input.required = true;     // NEW
+      container.appendChild(input);
+    }
+    else if (item.type === "MULTIPLE_CHOICE") {
+      item.choices.forEach(choice => {
+        const label = document.createElement("label");
+        label.className = "optionLine";
+        const radio = document.createElement("input");
+        radio.type = "radio";
+        radio.name = fieldName;
+        radio.value = choice;
+        if (item.required) radio.required = true;  // NEW
+        if (current === choice) radio.checked = true;
+        label.appendChild(radio);
+        label.appendChild(document.createTextNode(" " + choice));
+        container.appendChild(label);
+      });
+    }
+    else if (item.type === "CHECKBOX") {
+      let selected = current || [];
+      if (!Array.isArray(selected)) selected = String(selected).split(",").map(s => s.trim());
+      item.choices.forEach(choice => {
+        const label = document.createElement("label");
+        label.className = "optionLine";
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.name = fieldName;
+        box.value = choice;
+        if (selected.includes(choice)) box.checked = true;
+        label.appendChild(box);
+        label.appendChild(document.createTextNode(" " + choice));
+        container.appendChild(label);
+      });
+    }
+  });
+}
+
+/* NEW: buttons from Config; falls back to the original Save / Submit pair.
+   A button with "validate": true runs the browser's required-field check first. */
+function renderButtons() {
+  const holder = document.getElementById("formButtons");
+  holder.innerHTML = "";
+  const buttons = formConfig.buttons || [
+    { label: "Save",   action: "save" },
+    { label: "Submit", action: "submit" }
+  ];
+  buttons.forEach(b => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "actionBtn";
+    btn.textContent = b.label;
+    btn.addEventListener("click", () => send(b));
+    holder.appendChild(btn);
+  });
+}
+
+async function send(b) {
+  const form = document.getElementById("dynamicForm");
+  if (b.validate && !form.reportValidity()) return;   // NEW
+
+  const buttons = document.querySelectorAll(".actionBtn");
+  buttons.forEach(x => x.disabled = true);
+  setStatus(b.pending || "Sending…", true);
+
+  // URL-encoded body = same shape as a native form post, and a "simple"
+  // request, so no CORS preflight. Repeated keys (checkboxes) are preserved.
+  const body = new URLSearchParams(new FormData(form));
+  body.set("title", formConfig.title);
+  body.set("action", b.action);
+  body.set("sourceKey", sourceKey);                    // NEW
+  if (!body.has("Event ID")) body.set("Event ID", eventId);
+
+  let keepDisabled = false;
+  try {
+    const res = await fetch(EXEC, { method: "POST", body });
+    const result = JSON.parse(await res.text());
+    if (result.ok) {
+      if (result.next) {                               // NEW: open the next form
+        keepDisabled = true;
+        goToForm(result.next, result.eventId);
+        return;
+      }
+      if (result.message) {                            // NEW: server-supplied result text
+        keepDisabled = true;
+        showMessage(result.message);
+        return;
+      }
+      setStatus(b.action === "save"
+        ? "Saved. You can return to this same link later to continue."
+        : "Submitted. Thank you!", true);
+    } else {
+      setStatus("The form could not be processed. Please try again.", false);
+    }
+  } catch (err) {
+    console.error(err);
+    setStatus("Something went wrong sending the form. Please try again.", false);
+  } finally {
+    if (!keepDisabled) buttons.forEach(x => x.disabled = false);
+  }
+}
+
+load();
+</script>
+</body>
+</html>
