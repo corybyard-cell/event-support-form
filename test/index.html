@@ -260,7 +260,8 @@ async function send(b) {
         ? "Saved. You can return to this same link later to continue."
         : "Submitted. Thank you!", true);
     } else {
-      setStatus("The form could not be processed. Please try again.", false);
+      console.log(result);
+      setStatus("The form could not be processed: " + (result.error || "unknown"), false);
     }
   } catch (err) {
     console.error(err);
