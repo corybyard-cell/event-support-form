@@ -104,6 +104,7 @@ async function load() {
                 "&eventId=" + encodeURIComponent(eventId);
     const res = await fetch(url);
     const data = JSON.parse(await res.text());
+    if (data.maintenance) { setStatus("", true); showMessage(data.message); return; }
     formConfig = typeof data.formJson === "string" ? JSON.parse(data.formJson) : data.formJson;
     rowData = data.rowData || {};
     document.getElementById("title").textContent = formConfig.title;
@@ -132,6 +133,8 @@ async function runAction() {
     if (data.ok) {
       showMessage(data.message || "Thank you. Your response has been recorded.");
     } else {
+      if (data.maintenance) { showMessage(data.message);
+        return; }
       setStatus("We could not process this link. Please contact the Event Coordinator.", false);
     }
   } catch (err) {
@@ -273,6 +276,9 @@ async function send(b) {
         ? "Saved. You can return to this same link later to continue."
         : "Submitted. Thank you!", true);
     } else {
+      if (result.maintenance) { keepDisabled = true;
+        showMessage(result.message);
+        return; }
       console.log(result);
       setStatus("The form could not be processed: " + (result.error || "unknown"), false);
     }
